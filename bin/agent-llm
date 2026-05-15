@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""agent-llm — drop-in replacement for `claude -p` that can fall back to a
+local OpenAI-compatible LLM server (e.g. mlx-lm) when you blow through
+your Claude Max plan limit, hit a Claude outage, or just want to do work
+that doesn't need to burn API credit.
+
+Reads a single text file (~/.local/state/llm-backend) to decide which
+backend each call should use:
+  contents = "claude" (default)  -> exec the real `claude` CLI on PATH
+                                    (zero behavior change)
+  contents = "local"             -> POST the prompt to a local
+                                    OpenAI-compatible server (default
+                                    http://127.0.0.1:9420/v1/chat/completions)
+
+Usage matches `claude -p`:
+  agent-llm -p "your prompt here"
+  echo "prompt" | agent-llm -p
+
+Configure the local backend with env vars:
+  LOCAL_LLM_URL    full /v1/chat/completions URL (default localhost:9420)
+  LOCAL_LLM_MODEL  model id the server expects
+  LOCAL_LLM_MAX_TOKENS   default 800
+"""
+from __future__ import annotations
+import json, os, shutil, sys, urllib.request
+from pathlib import Path
+
+FLAG       = Path(os.environ.get("LLM_BACKEND_FLAG", str(Path.home() / ".local" / "state" / "llm-backend")))
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "/usr/local/bin/claude"
+LOCAL_URL  = os.environ.get("LOCAL_LLM_URL", "http://127.0.0.1:9420/v1/chat/completions")
+LOCAL_MODEL = os.environ.get("LOCAL_LLM_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit")
+MAX_TOKENS = int(os.environ.get("LOCAL_LLM_MAX_TOKENS", "800"))
+
+backend = (FLAG.read_text().strip() if FLAG.exists() else "claude").lower()
+
+if backend == "claude":
+    if not Path(CLAUDE_BIN).exists():
+        print(f"agent-llm: claude binary not found at {CLAUDE_BIN}. "
+              f"Set CLAUDE_BIN env var or install Claude Code.", file=sys.stderr)
+        sys.exit(127)
+    os.execv(CLAUDE_BIN, [CLAUDE_BIN] + sys.argv[1:])
+
+# local backend: parse out the prompt argument from `-p PROMPT` or stdin
+args = sys.argv[1:]
+prompt = ""
+i = 0
+while i < len(args):
+    if args[i] == "-p":
+        prompt = args[i+1] if i+1 < len(args) else sys.stdin.read()
+        i += 2
+    else:
+        i += 1
+if not prompt:
+    prompt = sys.stdin.read()
+
+body = {
+    "model": LOCAL_MODEL,
+    "messages": [{"role": "user", "content": prompt}],
+    "max_tokens": MAX_TOKENS,
+    "temperature": 0.3,
+}
+req = urllib.request.Request(
+    LOCAL_URL,
+    data=json.dumps(body).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=120) as r:
+        res = json.loads(r.read())
+    msg = res["choices"][0]["message"]
+    # Some models (Gemma 3) emit a reasoning channel; the final answer is in `content`
+    content = (msg.get("content") or msg.get("reasoning") or "").strip()
+    sys.stdout.write(content + ("\n" if not content.endswith("\n") else ""))
+    sys.exit(0)
+except Exception as e:
+    print(f"agent-llm local error: {e}", file=sys.stderr)
+    sys.exit(1)

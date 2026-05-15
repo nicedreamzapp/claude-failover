@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# llm-failover — flip the agent backend between Claude and a local LLM server.
+#
+# Use this when your Claude Max plan hits its limit, Claude has an outage,
+# or you want to run agents without burning API credit.
+#
+# Usage:
+#   llm-failover                show current backend + server status
+#   llm-failover local          load local mlx-lm server, route agents to it
+#   llm-failover claude         unload local server (frees ~17 GB), back to Claude
+#   llm-failover <mode> -q      flip silently (no iMessage/notify)
+#
+# Configure via env vars (or edit defaults below):
+#   LLM_BACKEND_FLAG     file holding "claude" or "local" (default ~/.local/state/llm-backend)
+#   LLM_LAUNCHAGENT      LaunchAgent label of your local server (default com.local.mlxserver)
+#   LLM_PORT             TCP port the local server listens on (default 9420)
+#   LLM_NOTIFY_CMD       optional command to call on flip (1 arg = message)
+#                        e.g. "imessage-send.sh" or "/usr/local/bin/say"
+
+set -e
+FLAG="${LLM_BACKEND_FLAG:-$HOME/.local/state/llm-backend}"
+LABEL="${LLM_LAUNCHAGENT:-com.local.mlxserver}"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+PORT="${LLM_PORT:-9420}"
+mkdir -p "$(dirname "$FLAG")"
+
+QUIET=0
+for arg in "$@"; do [ "$arg" = "-q" ] || [ "$arg" = "--quiet" ] && QUIET=1; done
+
+notify() {
+  [ "$QUIET" = "1" ] && return
+  if [ -n "$LLM_NOTIFY_CMD" ]; then
+    "$LLM_NOTIFY_CMD" "$1" >/dev/null 2>&1 || true
+  fi
+}
+
+server_up() { curl -sS --max-time 2 "http://127.0.0.1:${PORT}/v1/models" >/dev/null 2>&1; }
+
+case "${1:-status}" in
+  local|gemma|qwen)  # all aliases for "switch to local"
+    echo local > "$FLAG"
+    echo "agent backend now: local (port ${PORT})"
+    if ! server_up; then
+      if [ ! -f "$PLIST" ]; then
+        echo "ERROR: LaunchAgent plist not found at $PLIST" >&2
+        echo "  See LaunchAgents/com.example.mlxserver.plist.example for a template." >&2
+        exit 2
+      fi
+      launchctl load "$PLIST" 2>/dev/null || true
+      launchctl kickstart "gui/$(id -u)/$LABEL" 2>/dev/null || true
+      echo -n "loading local server (cold start ~30-90s on first call)"
+      for i in $(seq 1 180); do
+        if server_up; then echo " ready (${i}s)"; break; fi
+        [ $((i % 5)) -eq 0 ] && echo -n "."
+        sleep 1
+      done
+      server_up || { echo " TIMEOUT — check launchd logs"; exit 3; }
+    else
+      echo "local server already up"
+    fi
+    notify "agent backend flipped to LOCAL. claude usage paused. flip back: llm-failover claude"
+    ;;
+  claude)
+    echo claude > "$FLAG"
+    echo "agent backend now: claude"
+    if launchctl list 2>/dev/null | grep -q "$LABEL"; then
+      launchctl unload "$PLIST" 2>/dev/null || true
+      echo "local server unloaded (memory freed)"
+    fi
+    notify "agent backend flipped back to CLAUDE."
+    ;;
+  status|"")
+    cur=$(cat "$FLAG" 2>/dev/null || echo claude)
+    if server_up; then srv="local server: UP (port ${PORT})"; else srv="local server: down (lazy)"; fi
+    echo "current backend: $cur"
+    echo "$srv"
+    ;;
+  *)
+    echo "usage: llm-failover [local|claude|status] [--quiet]" >&2
+    exit 1
+    ;;
+esac

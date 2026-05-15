@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example LaunchAgent for a local mlx-lm OpenAI-compatible server.
+  Copy to ~/Library/LaunchAgents/<your-label>.plist, edit the placeholders,
+  then llm-failover will load/unload it on demand.
+
+  Setup steps:
+    1. python3 -m venv ~/.local/share/mlx-server/.venv
+    2. ~/.local/share/mlx-server/.venv/bin/pip install mlx-lm
+    3. Edit the placeholders below:
+       - VENV_PATH       absolute path to your venv's python
+       - MODEL_ID        a HuggingFace model id (any MLX-compatible LLM)
+       - PORT            default 9420 (matches llm-failover's default)
+    4. cp this file to ~/Library/LaunchAgents/<your-label>.plist
+    5. (RunAtLoad/KeepAlive are FALSE — llm-failover starts/stops it on demand)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.mlxserver</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/PATH/TO/VENV/.venv/bin/python</string>
+        <string>-m</string>
+        <string>mlx_lm.server</string>
+        <string>--model</string>
+        <string>mlx-community/Qwen2.5-7B-Instruct-4bit</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>9420</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/PATH/TO/VENV</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/mlxserver.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/mlxserver.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
