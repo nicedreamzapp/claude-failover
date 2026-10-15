@@ -1,0 +1,2 @@
+# Test dependencies. The scripts themselves use only the Python standard library.
+pytest==8.4.2

@@ -1,5 +1,7 @@
 # claude-failover
 
+[![ci](https://github.com/nicedreamzapp/claude-failover/actions/workflows/ci.yml/badge.svg)](https://github.com/nicedreamzapp/claude-failover/actions/workflows/ci.yml)
+
 **A backup brain for Claude Code. When your Claude Max plan hits its limit, your tokens are exhausted, or Claude is down — flip one command and your `claude -p` agents keep running on a local LLM. Default to Claude. Local only when you need it.**
 
 **What it is:** two small scripts (`agent-llm`, a drop-in stand-in for `claude -p`, and `llm-failover`, a one-command switch) that route your headless Claude Code calls to a local MLX model on your Mac when you flip a flag, and straight back to Claude when you flip it again.
@@ -181,6 +183,15 @@ What the local path does not do yet (see [`bin/agent-llm`](bin/agent-llm)):
 - **macOS only** for the switch. `agent-llm` alone runs anywhere Python does, but `llm-failover` needs `launchctl`.
 
 This project is for **keeping agents alive when Claude is unavailable**, NOT for replacing Claude on its strongest workloads. Expect to flip back to Claude as soon as it's available again.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite runs both scripts as subprocesses against a fake `claude` binary, a loopback HTTP server in place of `mlx_lm.server`, and fake `launchctl`/`curl`/`sleep`, so it runs on Linux with no model or network. CI runs it on every push and pull request.
 
 ## License
 
