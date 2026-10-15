@@ -6,3 +6,7 @@ venv/
 *.log
 *.bak
 *.bak-*
+
+# MkDocs build output
+site/
+.cache/
