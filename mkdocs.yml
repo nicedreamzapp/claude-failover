@@ -1,0 +1,76 @@
+site_name: claude-failover
+site_description: >-
+  Keep headless claude -p scripts running on a local MLX model when your
+  Claude plan hits its usage limit or Claude is down. Flip back with one command.
+# TODO-VERIFY: confirm this is the final GitHub Pages URL before publishing.
+site_url: https://nicedreamzapp.github.io/claude-failover/
+site_author: Matt Macosko
+repo_url: https://github.com/nicedreamzapp/claude-failover
+repo_name: nicedreamzapp/claude-failover
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Matt Macosko. MIT License.
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  # Social cards (Open Graph / Twitter images) generated per page at build time.
+  # Needs the imaging extras: pip install "mkdocs-material[imaging]" and the Cairo library.
+  - social
+# sitemap.xml is generated automatically by MkDocs on every build (uses site_url above).
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Quickstart: quickstart.md
+  - Configuration: configuration.md
+  - How it works: how-it-works.md
+  - Troubleshooting: troubleshooting.md
+  - FAQ: faq.md
+  - Changelog: changelog.md
+  - Credits: credits.md
