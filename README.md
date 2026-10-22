@@ -10,7 +10,8 @@ Built for people who **like** Claude and want to keep using it as primary, but d
 
 This is **NOT** "ditch Claude and run everything local." For that, see [claude-code-local](https://github.com/nicedreamzapp/claude-code-local) — that project replaces Claude entirely with a local model. This project is the opposite angle: **Claude stays primary**, local is just there for the day you need it.
 
-## What I built
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-banner.svg" width="100%" alt="01. What I built. Two small scripts and a launchd template"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-r1.svg" width="100%" alt="agent-llm. A drop-in stand-in for claude -p. llm-failover. A one-command switch between Claude and local. launchd template. Runs mlx_lm.server on demand only."></picture>
 
 Written by Matt Macosko:
 
@@ -22,14 +23,17 @@ Upstream, not mine: [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/mai
 
 ---
 
-## When you'd want this
+### When you'd want this
 
 - You're on Claude Max ($100/mo SDK credit, or any tier with a usage cap) and you sometimes hit it mid-month
 - You run headless `claude -p` scripts (cron jobs, agents, watchers, custom tooling) and don't want them to die during an Anthropic outage
 - You want to run lower-stakes work locally to **preserve your Claude budget for the work that actually needs Claude's quality**
 - You have an Apple Silicon Mac with enough RAM to run an MLX model (8 GB minimum for a 7B-class model, 32+ GB for 30B class)
 
-## How it works
+<img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s01-rule.svg" width="100%" alt="">
+
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-banner.svg" width="100%" alt="02. How it works. One text file decides the route"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-r1.svg" width="100%" alt="flag = claude. Runs the real claude -p. flag = local. POSTs to the local MLX server. Lazy-load. The model loads only when you flip to local."></picture>
 
 ```
 ┌─────────────────────┐
@@ -48,7 +52,7 @@ Upstream, not mine: [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/mai
 
 **The whole switch is a single text file.** Flip it with `llm-failover local` or `llm-failover claude`. Every subsequent `agent-llm` invocation reads the flag and routes accordingly.
 
-## Lazy-load by default — zero RAM cost when not in failover
+### Lazy-load by default — zero RAM cost when not in failover
 
 `llm-failover` doesn't keep the local server running 24/7. It LOADS the model only when you flip to local mode, and UNLOADS it when you flip back. So most days you're just on Claude with no extra memory pressure. The local model only consumes RAM during an actual failover.
 
@@ -58,7 +62,10 @@ If you want INSTANT failover instead, change `RunAtLoad` to `<true/>` in your pl
 
 ---
 
-## Install
+<img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s02-rule.svg" width="100%" alt="">
+
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-banner.svg" width="100%" alt="03. Install and configure. Wire your scripts, pick a model"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-r1.svg" width="100%" alt="Default model. Qwen 2.5 7B 4-bit MLX, about 4 GB on disk. Env vars. All with defaults, listed in the table. Notify hook. Optional command run on every flip."></picture>
 
 Requires: Apple Silicon Mac (macOS only: `llm-failover` uses `launchctl`), Python 3.9+, `curl`, [Claude Code CLI](https://claude.ai/code), [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm).
 
@@ -98,7 +105,7 @@ llm-failover claude
 # unloads the server, flips back. RAM released.
 ```
 
-## Wiring your scripts
+### Wiring your scripts
 
 Find every place in your code that calls Claude programmatically:
 
@@ -112,7 +119,7 @@ result = subprocess.run(["/Users/YOU/.local/bin/agent-llm", "-p", prompt], ...)
 
 That's it. While the flag is "claude" the shim execs the real Claude CLI and your script behaves identically to before. When you flip the flag, every subsequent call routes to your local server with zero code changes.
 
-## Optional: status indicator on a dashboard
+### Optional: status indicator on a dashboard
 
 If you have a self-hosted dashboard, poll the flag file (or expose `/api/llm-backend` as an endpoint) and show a colored badge: green for CLAUDE, blue for LOCAL. Useful when an agent has been quietly running on the wrong backend for a while.
 
@@ -124,7 +131,7 @@ def llm_backend():
     return {"backend": flag.read_text().strip() if flag.exists() else "claude"}
 ```
 
-## Notify on flip
+### Notify on flip
 
 Set `LLM_NOTIFY_CMD` to any one-arg command (Slack webhook wrapper, iMessage script, Pushover, `say`):
 
@@ -138,7 +145,7 @@ Add `-q` (or `--quiet`) to flip without sending a notification.
 
 ---
 
-## Configuration
+### Configuration
 
 All env vars (with defaults):
 
@@ -153,7 +160,7 @@ All env vars (with defaults):
 | `LLM_PORT`             | `9420`                                               | Port `llm-failover` health-checks (change `LOCAL_LLM_URL` to match) |
 | `LLM_NOTIFY_CMD`       | (none)                                               | One-arg command run on flip (notification hook)         |
 
-## Choosing a local model
+### Choosing a local model
 
 The default uses Qwen 2.5 7B 4-bit MLX (~4 GB on disk, ~5 GB loaded). It's small enough to run anywhere and good enough for triage / classification / format-conversion work.
 
@@ -168,7 +175,10 @@ Realistic upgrades for more capable replies on Apple Silicon:
 
 Just change the `--model` line in your LaunchAgent plist and `LOCAL_LLM_MODEL` env var.
 
-## Honest limitations
+<img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s03-rule.svg" width="100%" alt="">
+
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-banner.svg" width="100%" alt="04. Limits, tests and license. Honest about what it does not do"></picture>
+<picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-r1.svg" width="100%" alt="No automatic failover. You run llm-failover local yourself. Tests run anywhere. Fake claude and a loopback server, no model or network. MIT. See CREDITS.md for upstream projects."></picture>
 
 Local 7B-30B models won't write replies as good as Claude on tasks that need:
 - Deep awareness of your codebase / repo specifics
@@ -184,7 +194,7 @@ What the local path does not do yet (see [`bin/agent-llm`](bin/agent-llm)):
 
 This project is for **keeping agents alive when Claude is unavailable**, NOT for replacing Claude on its strongest workloads. Expect to flip back to Claude as soon as it's available again.
 
-## Tests
+### Tests
 
 ```bash
 pip install -r requirements-dev.txt
@@ -193,11 +203,11 @@ pytest
 
 The suite runs both scripts as subprocesses against a fake `claude` binary, a loopback HTTP server in place of `mlx_lm.server`, and fake `launchctl`/`curl`/`sleep`, so it runs on Linux with no model or network. CI runs it on every push and pull request.
 
-## License
+### License
 
 MIT
 
-## Related
+### Related
 
 - [CREDITS.md](CREDITS.md): upstream projects this is built on
 - [claude-code-local](https://github.com/nicedreamzapp/claude-code-local) — replace Claude entirely with a local model
@@ -207,3 +217,5 @@ MIT
 ---
 
 Tags: claude, claude-code, claude-max, claude-fallback, claude-failover, claude-backup, anthropic-fallback, claude-rate-limit, mlx, mlx-lm, gemma, qwen, llama, apple-silicon, local-llm, offline-llm, llm-router, agent-fallback, claude-usage-limit
+
+<img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/assets/readme/s04-rule.svg" width="100%" alt="">
