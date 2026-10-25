@@ -1,2 +1,5 @@
 # Test dependencies. The scripts themselves use only the Python standard library.
-pytest==9.1.1
+# Patched pytest (9.0.3+) needs Python 3.10+; older Pythons still in the CI matrix get the last
+# release that installs there (test-only, never shipped).
+pytest==9.1.1; python_version >= "3.10"
+pytest==8.4.2; python_version >= "3.9" and python_version < "3.10"
