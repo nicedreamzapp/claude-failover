@@ -23,7 +23,7 @@ The default is `mlx-community/Qwen2.5-7B-Instruct-4bit`. The [Configuration](con
 
 ## Can I use Ollama, LM Studio or llama.cpp instead of mlx-lm?
 
-`agent-llm` will talk to any server with an OpenAI-compatible `/v1/chat/completions` endpoint; set `LOCAL_LLM_URL`. `llm-failover` only knows how to start and stop a launchd job and health-checks `/v1/models`, so you would manage that server yourself and write the flag directly. <!-- TODO-VERIFY: not tested against these servers in the repo. -->
+`agent-llm` will talk to any server with an OpenAI-compatible `/v1/chat/completions` endpoint or an Anthropic-compatible `/v1/messages` endpoint; set `LOCAL_LLM_URL`. With [claude-code-local](https://github.com/nicedreamzapp/claude-code-local) running, it is used automatically. `llm-failover` only knows how to start and stop a launchd job and health-checks `/v1/models`, so you would manage that server yourself and write the flag directly. <!-- TODO-VERIFY: not tested against these servers in the repo. -->
 
 ## Does it run on Linux or Intel Macs?
 
@@ -39,7 +39,7 @@ Not with the default settings. In Claude mode `agent-llm` finds the real CLI wit
 
 ## How is this different from claude-code-local?
 
-[claude-code-local](https://github.com/nicedreamzapp/claude-code-local) replaces Claude with a local model. claude-failover keeps Claude as the default and uses a local model only while you switch to it.
+[claude-code-local](https://github.com/nicedreamzapp/claude-code-local) replaces Claude with a local model. claude-failover keeps Claude as the default and uses a local model only while you switch to it. If both are installed, `llm-failover local` uses claude-code-local's server instead of starting its own.
 
 ## Is it affiliated with Anthropic?
 

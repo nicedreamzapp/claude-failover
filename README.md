@@ -16,7 +16,8 @@ This is **NOT** "ditch Claude and run everything local." For that, see [claude-c
 Written by Matt Macosko:
 
 - [`bin/agent-llm`](bin/agent-llm): Python shim that reads the flag file. On `claude` it `exec`s the real Claude CLI with your arguments untouched. On `local` it pulls the prompt from `-p` or stdin, POSTs it to an OpenAI-compatible `/v1/chat/completions` endpoint, and prints the reply.
-- [`bin/llm-failover`](bin/llm-failover): Bash switch. `local` writes the flag, loads the LaunchAgent and waits up to 180 s for the server to answer; `claude` writes the flag and unloads the server to free RAM; `status` shows both. Optional notify hook and `-q` quiet flag.
+- [`bin/llm-failover`](bin/llm-failover): Bash switch. `local` writes the flag and, unless claude-code-local's server is already up, loads the LaunchAgent and waits up to 180 s for the server to answer; `claude` writes the flag and unloads the server it loaded to free RAM; `status` shows the backend and which server is serving. Optional notify hook and `-q` quiet flag.
+- [`install.sh`](install.sh) / [`uninstall.sh`](uninstall.sh): one-line install and removal (see Install below).
 - [`LaunchAgents/com.example.mlxserver.plist.example`](LaunchAgents/com.example.mlxserver.plist.example): launchd template that runs `mlx_lm.server` on demand only (`RunAtLoad` and `KeepAlive` off).
 
 Upstream, not mine: [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm) (the local server), Qwen 2.5 (default model weights), and [Claude Code](https://claude.ai/code) (the CLI being wrapped). See [CREDITS.md](CREDITS.md).
@@ -58,7 +59,7 @@ Upstream, not mine: [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/mai
 
 Tradeoff: cold-load on the first call after a flip costs 30-90 seconds (depending on your machine and whether the weights are in OS file cache). After that, calls run at full local speed (~10 tok/s for a 30B-class model on M-series).
 
-If you want INSTANT failover instead, change `RunAtLoad` to `<true/>` in your plist — the server stays warm at the cost of holding the model weights in RAM continuously. Note that `llm-failover claude` still unloads it, so it is warm again only after your next login or `llm-failover local`.
+If you want INSTANT failover instead, change `RunAtLoad` to `<true/>` in your plist — the server stays warm at the cost of holding the model weights in RAM continuously. `llm-failover claude` only unloads a server that `llm-failover local` loaded, so a server started at login stays warm.
 
 ---
 
@@ -67,42 +68,34 @@ If you want INSTANT failover instead, change `RunAtLoad` to `<true/>` in your pl
 <picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/28a87cde3eda0f001af1c1d7497c9644e0a677ef/assets/readme/s03-banner-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/28a87cde3eda0f001af1c1d7497c9644e0a677ef/assets/readme/s03-banner-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/28a87cde3eda0f001af1c1d7497c9644e0a677ef/assets/readme/s03-banner.svg" width="100%" alt="03. Install and configure. Wire your scripts, pick a model"></picture>
 <picture><source media="(max-width: 610px), (min-width: 768px) and (max-width: 895px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/28a87cde3eda0f001af1c1d7497c9644e0a677ef/assets/readme/s03-r1-m.svg"><source media="(max-width: 1149px)" srcset="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/28a87cde3eda0f001af1c1d7497c9644e0a677ef/assets/readme/s03-r1-mid.svg"><img src="https://raw.githubusercontent.com/nicedreamzapp/claude-failover/28a87cde3eda0f001af1c1d7497c9644e0a677ef/assets/readme/s03-r1.svg" width="100%" alt="Default model. Qwen 2.5 7B 4-bit MLX, about 4 GB on disk. Env vars. All with defaults, listed in the table. Notify hook. Optional command run on every flip."></picture>
 
-Requires: Apple Silicon Mac (macOS only: `llm-failover` uses `launchctl`), Python 3.9+, `curl`, [Claude Code CLI](https://claude.ai/code), [mlx-lm](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm).
+Requires: Apple Silicon Mac (macOS only: `llm-failover` uses `launchctl`), Python 3.9+, `git`, `curl`, [Claude Code CLI](https://claude.ai/code).
 
 ```bash
-# 1. Clone
-git clone https://github.com/nicedreamzapp/claude-failover.git
-cd claude-failover
+curl -fsSL https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/install.sh | bash
+```
 
-# 2. Drop the binaries on your PATH
-mkdir -p ~/.local/bin
-cp bin/agent-llm bin/llm-failover ~/.local/bin/
-chmod +x ~/.local/bin/agent-llm ~/.local/bin/llm-failover
+Uninstall (add `-s -- --purge` to also delete the clone, flag and config):
 
-# 3. Set up an mlx-lm venv (the model itself, Qwen 2.5 7B by default,
-#    downloads from Hugging Face the first time the server starts)
-python3 -m venv ~/.local/share/mlx-server/.venv
-~/.local/share/mlx-server/.venv/bin/pip install mlx-lm
+```bash
+curl -fsSL https://raw.githubusercontent.com/nicedreamzapp/claude-failover/main/uninstall.sh | bash
+```
 
-# 4. Copy the example LaunchAgent and edit the placeholders
-cp LaunchAgents/com.example.mlxserver.plist.example ~/Library/LaunchAgents/com.local.mlxserver.plist
-# Replace /PATH/TO/VENV with the absolute path (e.g. /Users/YOU/.local/share/mlx-server)
-# and optionally change the --model line
+The installer clones to `~/.local/share/claude-failover` (`FAILOVER_DIR`) and symlinks `agent-llm` and `llm-failover` into `~/.local/bin` (`KIT_BIN_DIR`). If [claude-code-local](https://github.com/nicedreamzapp/claude-code-local) is installed, failover uses its server on port 4000 and nothing else is set up. Otherwise it creates an mlx-lm venv and an on-demand LaunchAgent (`FAILOVER_LABEL`, default `com.local.mlxserver`) for `mlx_lm.server` on port 9420; `FAILOVER_WITH_MLX=1` sets that up even alongside claude-code-local. No model is downloaded at install time. Manual steps: [docs/install.md](docs/install.md).
 
-# 5. Verify the failover toggle works
+```bash
 llm-failover status
-# expects: "current backend: claude" (default) and "local server: down (lazy)"
+# "current backend: claude" and which local server is up (or "down (lazy)")
 
 llm-failover local
-# flips the flag, loads the LaunchAgent, waits for the server
-# (the very first run also downloads the model, so it can take longer than 90s
-#  and hit the 180s timeout; just run it again once the download finishes)
+# flips the flag; uses claude-code-local if it is up, otherwise loads the
+# mlx LaunchAgent and waits (the first run downloads the model, so it can
+# hit the 180s timeout; just run it again once the download finishes)
 
 echo "say hello in one word" | agent-llm -p
 # should run on local model
 
 llm-failover claude
-# unloads the server, flips back. RAM released.
+# flips back; unloads the mlx server only if llm-failover loaded it
 ```
 
 ### Wiring your scripts

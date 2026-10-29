@@ -84,4 +84,4 @@ The mode must be the first argument. Use `llm-failover local -q`.
 
 ## The server keeps running after `llm-failover claude`
 
-`claude` only unloads the plist if `launchctl list` contains the label. If you started `mlx_lm.server` some other way, or used a different label, stop it yourself or set `LLM_LAUNCHAGENT` to match.
+`claude` only unloads the plist if `llm-failover local` loaded it and `launchctl list` contains the label. If you started `mlx_lm.server` some other way (at login, by hand, or under a different label), stop it yourself, for example `launchctl bootout gui/$(id -u)/<label>`. claude-code-local's server is never stopped by `llm-failover`.
