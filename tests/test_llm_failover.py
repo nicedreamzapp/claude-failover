@@ -37,6 +37,14 @@ class TestStatus:
         r = run_failover("status")
         assert r.stdout == "current backend: local\nlocal server: UP (port 9420)\n"
 
+    def test_status_prefers_claude_code_local(self, run_failover, mac):
+        mac.ccl_up = True
+        mac.up_after = 0
+        r = run_failover("status", env={"CCL_PORT": "29101"})
+        assert r.stdout == "current backend: claude\nlocal server: claude-code-local UP (port 29101)\n"
+        assert mac.health_calls == ["-sS --max-time 2 http://127.0.0.1:29101/health"]
+        assert mac.curl_calls == []
+
     def test_status_does_not_touch_launchd_or_flag(self, run_failover, flag, mac):
         run_failover("status")
         assert mac.launchctl_calls == []
@@ -73,6 +81,39 @@ class TestLocal:
         assert flag.read_text() == "local\n"
         assert r.stdout == "agent backend now: local (port 9420)\nlocal server already up\n"
         assert mac.launchctl_calls == []
+
+    def test_claude_code_local_up_just_flips_flag(self, run_failover, flag, mac, plist):
+        mac.ccl_up = True
+        r = run_failover("local", env={"CCL_PORT": "29102"})
+        assert r.returncode == 0, r.stderr
+        assert flag.read_text() == "local\n"
+        assert r.stdout == (
+            "agent backend now: local (claude-code-local, port 29102)\n"
+            "claude-code-local server already up\n"
+        )
+        assert mac.launchctl_calls == []  # its own mlx LaunchAgent is never loaded
+        assert mac.curl_calls == []
+        assert not (flag.parent / "llm-failover.loaded").exists()
+
+    def test_label_and_port_from_config_file(self, run_failover, mac, home):
+        cfg = home / ".config" / "claude-failover" / "config"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("# written by install.sh\nLLM_LAUNCHAGENT=cfg.label\nLLM_PORT=7778\n")
+        p = home / "Library" / "LaunchAgents" / "cfg.label.plist"
+        p.parent.mkdir(parents=True)
+        p.write_text("<plist/>")
+        mac.up_after = 1
+        r = run_failover("local")
+        assert r.returncode == 0, r.stderr
+        assert "port 7778" in r.stdout
+        assert mac.launchctl_calls == [f"load {p}", f"kickstart gui/{_uid()}/cfg.label"]
+
+    def test_env_beats_config_file(self, run_failover, mac, home):
+        cfg = home / ".config" / "claude-failover" / "config"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("LLM_PORT=7778\n")
+        r = run_failover("status", env={"LLM_PORT": "7779"})
+        assert mac.curl_calls == ["-sS --max-time 2 http://127.0.0.1:7779/v1/models"]
 
     @pytest.mark.parametrize("alias", ["gemma", "qwen"])
     def test_aliases_write_local(self, run_failover, flag, mac, alias):
@@ -166,21 +207,39 @@ class TestLocal:
 # claude
 # --------------------------------------------------------------------------- #
 class TestClaude:
-    def test_flips_flag_and_unloads_loaded_server(self, run_failover, flag, mac, plist):
+    def test_flips_flag_and_unloads_server_it_loaded(self, run_failover, flag, mac, plist):
         flag.parent.mkdir(parents=True)
         flag.write_text("local\n")
+        mark = flag.parent / "llm-failover.loaded"
+        mark.write_text("com.local.mlxserver\n")
         mac.loaded_label = "com.local.mlxserver"
         r = run_failover("claude")
         assert r.returncode == 0, r.stderr
         assert flag.read_text() == "claude\n"
         assert mac.launchctl_calls == ["list", f"unload {plist}"]
         assert r.stdout == "agent backend now: claude\nlocal server unloaded (memory freed)\n"
+        assert not mark.exists()
+
+    def test_never_unloads_a_server_it_did_not_load(self, run_failover, flag, mac, plist):
+        mac.loaded_label = "com.local.mlxserver"  # loaded by someone else
+        r = run_failover("claude")
+        assert r.returncode == 0, r.stderr
+        assert flag.read_text() == "claude\n"
+        assert mac.launchctl_calls == []
+        assert r.stdout == "agent backend now: claude\n"
+
+    def test_marker_for_another_label_is_ignored(self, run_failover, flag, mac, plist):
+        flag.parent.mkdir(parents=True)
+        (flag.parent / "llm-failover.loaded").write_text("other.label\n")
+        mac.loaded_label = "com.local.mlxserver"
+        run_failover("claude")
+        assert mac.launchctl_calls == []
 
     def test_no_unload_when_not_loaded(self, run_failover, flag, mac):
         r = run_failover("claude")
         assert r.returncode == 0, r.stderr
         assert flag.read_text() == "claude\n"
-        assert mac.launchctl_calls == ["list"]
+        assert mac.launchctl_calls == []
         assert r.stdout == "agent backend now: claude\n"
 
     def test_notify_and_quiet(self, run_failover, mac):
@@ -192,6 +251,7 @@ class TestClaude:
         mac.up_after = 1
         assert run_failover("local").returncode == 0
         assert flag.read_text() == "local\n"
+        assert (flag.parent / "llm-failover.loaded").read_text() == "com.local.mlxserver\n"
         mac.loaded_label = "com.local.mlxserver"
         assert run_failover("claude").returncode == 0
         assert flag.read_text() == "claude\n"

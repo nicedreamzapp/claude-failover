@@ -153,11 +153,14 @@ All env vars (with defaults):
 |------------------------|------------------------------------------------------|---------------------------------------------------------|
 | `LLM_BACKEND_FLAG`     | `~/.local/state/llm-backend`                         | File holding `claude` or `local`                         |
 | `CLAUDE_BIN`           | `which claude`, then `/usr/local/bin/claude`         | Path to the real Claude CLI                              |
-| `LOCAL_LLM_URL`        | `http://127.0.0.1:9420/v1/chat/completions`          | OpenAI-compatible endpoint                               |
+| `LOCAL_LLM_URL`        | auto: claude-code-local `:4000/v1/messages` if up, else `:9420/v1/chat/completions` | Endpoint; a `/v1/messages` URL speaks Anthropic, others OpenAI |
+| `CCL_PORT`             | `4000`                                               | claude-code-local port, preferred when its `/health` answers |
+| `LOCAL_LLM_API_KEY`    | `sk-local`                                           | `x-api-key` for Anthropic-style endpoints                |
 | `LOCAL_LLM_MODEL`      | `mlx-community/Qwen2.5-7B-Instruct-4bit`             | Model id the local server expects                        |
 | `LOCAL_LLM_MAX_TOKENS` | `800`                                                | Max output tokens per call                               |
 | `LLM_LAUNCHAGENT`      | `com.local.mlxserver`                                | LaunchAgent label `llm-failover` will load/unload       |
-| `LLM_PORT`             | `9420`                                               | Port `llm-failover` health-checks (change `LOCAL_LLM_URL` to match) |
+| `LLM_PORT`             | `9420`                                               | mlx-lm server port (health check and fallback URL)      |
+| `FAILOVER_CONFIG`      | `~/.config/claude-failover/config`                   | Optional `KEY=VALUE` file for `LLM_LAUNCHAGENT` / `LLM_PORT` / `CCL_PORT` (written by `install.sh`) |
 | `LLM_NOTIFY_CMD`       | (none)                                               | One-arg command run on flip (notification hook)         |
 
 ### Choosing a local model

@@ -5,7 +5,7 @@ description: Reference for claude-failover configuration, read from the source. 
 
 # Configuration
 
-Everything on this page is read from [`bin/agent-llm`](https://github.com/nicedreamzapp/claude-failover/blob/main/bin/agent-llm), [`bin/llm-failover`](https://github.com/nicedreamzapp/claude-failover/blob/main/bin/llm-failover) and the [example plist](https://github.com/nicedreamzapp/claude-failover/blob/main/LaunchAgents/com.example.mlxserver.plist.example). There is no config file; all settings are environment variables.
+Everything on this page is read from [`bin/agent-llm`](https://github.com/nicedreamzapp/claude-failover/blob/main/bin/agent-llm), [`bin/llm-failover`](https://github.com/nicedreamzapp/claude-failover/blob/main/bin/llm-failover) and the [example plist](https://github.com/nicedreamzapp/claude-failover/blob/main/LaunchAgents/com.example.mlxserver.plist.example). All settings are environment variables. `llm-failover` also reads `LLM_LAUNCHAGENT`, `LLM_PORT` and `CCL_PORT` from an optional `KEY=VALUE` file (`FAILOVER_CONFIG`, written by `install.sh`); the environment wins over the file.
 
 ## Environment variables
 
@@ -13,15 +13,18 @@ Everything on this page is read from [`bin/agent-llm`](https://github.com/nicedr
 |---|---|---|---|
 | `LLM_BACKEND_FLAG` | both | `~/.local/state/llm-backend` | Path of the flag file. `llm-failover` creates its parent directory on every run. |
 | `CLAUDE_BIN` | `agent-llm` | `shutil.which("claude")`, then `/usr/local/bin/claude` | Path of the real Claude CLI used in `claude` mode. If the path does not exist, `agent-llm` exits 127. |
-| `LOCAL_LLM_URL` | `agent-llm` | `http://127.0.0.1:9420/v1/chat/completions` | Full URL the prompt is POSTed to in `local` mode. |
-| `LOCAL_LLM_MODEL` | `agent-llm` | `mlx-community/Qwen2.5-7B-Instruct-4bit` | Sent as `model` in the request body. |
+| `LOCAL_LLM_URL` | `agent-llm` | auto | Full URL the prompt is POSTed to in `local` mode, used as-is. A URL ending in `/v1/messages` gets the Anthropic Messages API, anything else OpenAI chat-completions. When unset (auto): `http://127.0.0.1:<CCL_PORT>/v1/messages` if claude-code-local's `/health` answers, otherwise `http://127.0.0.1:<LLM_PORT>/v1/chat/completions`. |
+| `LOCAL_LLM_MODEL` | `agent-llm` | `mlx-community/Qwen2.5-7B-Instruct-4bit` | Sent as `model` in the request body. For Anthropic-style URLs the default is `claude-sonnet-4-6` (claude-code-local accepts any id). |
+| `LOCAL_LLM_API_KEY` | `agent-llm` | `sk-local` | Sent as `x-api-key` to Anthropic-style URLs. |
+| `CCL_PORT` | both | `4000` | Port of the [claude-code-local](https://github.com/nicedreamzapp/claude-code-local) server. Probed at `/health`; when it answers it is preferred over mlx-lm. |
 | `LOCAL_LLM_MAX_TOKENS` | `agent-llm` | `800` | Sent as `max_tokens`. Parsed with `int()` at startup in both modes, so a non-integer value makes `agent-llm` crash even when the backend is `claude`. |
 | `LLM_LAUNCHAGENT` | `llm-failover` | `com.local.mlxserver` | LaunchAgent label. Also decides the plist path: `~/Library/LaunchAgents/<label>.plist`. |
-| `LLM_PORT` | `llm-failover` | `9420` | Port used only for the health check `http://127.0.0.1:<port>/v1/models`. It does not change `LOCAL_LLM_URL`; set both if you move the server. |
+| `LLM_PORT` | both | `9420` | Port of the mlx-lm server: health check `http://127.0.0.1:<port>/v1/models` in `llm-failover`, and the fallback URL in `agent-llm` when `LOCAL_LLM_URL` is unset. |
+| `FAILOVER_CONFIG` | `llm-failover` | `~/.config/claude-failover/config` | Optional `KEY=VALUE` file for `LLM_LAUNCHAGENT`, `LLM_PORT`, `CCL_PORT`. |
 | `LLM_NOTIFY_CMD` | `llm-failover` | unset | Command run after a successful flip, with the message as its single argument. Its output and exit status are ignored. |
 
 !!! note "One port, three settings"
-    The port appears in three places: `--port` in the plist, `LLM_PORT` for `llm-failover`, and the URL in `LOCAL_LLM_URL` for `agent-llm`. They all default to `9420`.
+    The mlx-lm port appears in two places: `--port` in the plist and `LLM_PORT` (read by both scripts). They default to `9420`. If you set `LOCAL_LLM_URL` yourself, it must match too.
 
 `LLM_NOTIFY_CMD` is run as a single program path, not through a shell, so it cannot contain its own arguments. Wrap anything more complex in a small script.
 
@@ -33,10 +36,10 @@ llm-failover [local|claude|status] [-q|--quiet]
 
 | Command | Effect |
 |---|---|
-| `status` (or no argument) | Prints `current backend: <flag contents>` (or `claude` if the file is missing) and whether the server answers on `LLM_PORT`. |
-| `local` | Writes `local` to the flag, then loads and kickstarts the LaunchAgent if the server is not already up, and polls once per second for up to 180 seconds. Sends the notification on success. |
+| `status` (or no argument) | Prints `current backend: <flag contents>` (or `claude` if the file is missing) and which server is serving: claude-code-local on `CCL_PORT`, else mlx-lm on `LLM_PORT`, else down. |
+| `local` | Writes `local` to the flag. If claude-code-local answers on `CCL_PORT`, stops there. Otherwise loads and kickstarts the LaunchAgent if the mlx-lm server is not already up, and polls once per second for up to 180 seconds. Sends the notification on success. |
 | `gemma`, `qwen` | Aliases for `local`. They do not choose a model. |
-| `claude` | Writes `claude` to the flag. If `launchctl list` contains the label, unloads the plist. Sends the notification. |
+| `claude` | Writes `claude` to the flag. Unloads the plist only if `llm-failover local` loaded it (a marker file next to the flag) and `launchctl list` still contains the label. Sends the notification. |
 | anything else | Prints usage and exits 1. |
 
 `-q` / `--quiet` can appear anywhere in the arguments and suppresses the notification. The mode is always taken from the **first** argument, so `llm-failover -q local` is treated as an unknown command. Put the mode first: `llm-failover local -q`.

@@ -62,7 +62,8 @@ def test_plist_runs_mlx_lm_server_on_default_host_port_and_model(plist):
     agent = AGENT_LLM.read_text()
     assert f'"{_arg(args, "--model")}"' in agent  # same default model as agent-llm
     assert 'PORT="${LLM_PORT:-9420}"' in LLM_FAILOVER.read_text()
-    assert "http://127.0.0.1:9420/v1/chat/completions" in agent
+    assert 'os.environ.get("LLM_PORT") or "9420"' in agent
+    assert 'f"http://127.0.0.1:{llm_port}/v1/chat/completions"' in agent
 
 
 @pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("plutil"), reason="plutil is macOS-only")
@@ -76,19 +77,26 @@ def test_plist_passes_plutil_lint():
 # --------------------------------------------------------------------------- #
 CODE_DEFAULTS = {
     "LLM_BACKEND_FLAG": "~/.local/state/llm-backend",
-    "LOCAL_LLM_URL": "http://127.0.0.1:9420/v1/chat/completions",
+    "LOCAL_LLM_URL": "auto",
     "LOCAL_LLM_MODEL": "mlx-community/Qwen2.5-7B-Instruct-4bit",
     "LOCAL_LLM_MAX_TOKENS": "800",
     "LLM_LAUNCHAGENT": "com.local.mlxserver",
     "LLM_PORT": "9420",
+    "CCL_PORT": "4000",
+    "LOCAL_LLM_API_KEY": "sk-local",
+    "FAILOVER_CONFIG": "~/.config/claude-failover/config",
 }
 
 
 def test_code_defaults_are_what_we_think():
     agent = AGENT_LLM.read_text()
     failover = LLM_FAILOVER.read_text()
-    assert '"LOCAL_LLM_URL", "http://127.0.0.1:9420/v1/chat/completions"' in agent
-    assert '"LOCAL_LLM_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit"' in agent
+    assert 'url = os.environ.get("LOCAL_LLM_URL")' in agent
+    assert 'OPENAI_MODEL = "mlx-community/Qwen2.5-7B-Instruct-4bit"' in agent
+    assert 'os.environ.get("CCL_PORT") or "4000"' in agent
+    assert 'os.environ.get("LOCAL_LLM_API_KEY", "sk-local")' in agent
+    assert 'CPORT="${CCL_PORT:-4000}"' in failover
+    assert 'CONFIG="${FAILOVER_CONFIG:-$HOME/.config/claude-failover/config}"' in failover
     assert '"LOCAL_LLM_MAX_TOKENS", "800"' in agent
     assert 'Path.home() / ".local" / "state" / "llm-backend"' in agent
     assert 'FLAG="${LLM_BACKEND_FLAG:-$HOME/.local/state/llm-backend}"' in failover

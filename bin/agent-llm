@@ -1,34 +1,41 @@
 #!/usr/bin/env python3
 """agent-llm — drop-in replacement for `claude -p` that can fall back to a
-local OpenAI-compatible LLM server (e.g. mlx-lm) when you blow through
-your Claude Max plan limit, hit a Claude outage, or just want to do work
-that doesn't need to burn API credit.
+local LLM server when you blow through your Claude Max plan limit, hit a
+Claude outage, or just want to do work that doesn't need to burn API credit.
 
 Reads a single text file (~/.local/state/llm-backend) to decide which
 backend each call should use:
   contents = "claude" (default)  -> exec the real `claude` CLI on PATH
                                     (zero behavior change)
-  contents = "local"             -> POST the prompt to a local
-                                    OpenAI-compatible server (default
-                                    http://127.0.0.1:9420/v1/chat/completions)
+  contents = "local"             -> send the prompt to a local server
+
+Which local server (first match wins):
+  1. LOCAL_LLM_URL if set, used as-is. A URL ending in /v1/messages speaks the
+     Anthropic Messages API; anything else speaks OpenAI chat-completions.
+  2. claude-code-local, if http://127.0.0.1:${CCL_PORT:-4000}/health answers:
+     Anthropic Messages API at /v1/messages.
+  3. mlx_lm.server at http://127.0.0.1:${LLM_PORT:-9420}/v1/chat/completions.
 
 Usage matches `claude -p`:
   agent-llm -p "your prompt here"
   echo "prompt" | agent-llm -p
 
 Configure the local backend with env vars:
-  LOCAL_LLM_URL    full /v1/chat/completions URL (default localhost:9420)
-  LOCAL_LLM_MODEL  model id the server expects
+  LOCAL_LLM_URL          full endpoint URL (see above)
+  LOCAL_LLM_MODEL        model id the server expects
   LOCAL_LLM_MAX_TOKENS   default 800
+  LOCAL_LLM_API_KEY      x-api-key for Anthropic-style servers (default sk-local)
+  CCL_PORT               claude-code-local port (default 4000)
+  LLM_PORT               mlx_lm.server port (default 9420)
 """
 from __future__ import annotations
-import json, os, shutil, sys, urllib.request
+import json, os, shutil, sys, urllib.parse, urllib.request
 from pathlib import Path
 
 FLAG       = Path(os.environ.get("LLM_BACKEND_FLAG", str(Path.home() / ".local" / "state" / "llm-backend")))
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "/usr/local/bin/claude"
-LOCAL_URL  = os.environ.get("LOCAL_LLM_URL", "http://127.0.0.1:9420/v1/chat/completions")
-LOCAL_MODEL = os.environ.get("LOCAL_LLM_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit")
+OPENAI_MODEL = "mlx-community/Qwen2.5-7B-Instruct-4bit"
+ANTHROPIC_MODEL = "claude-sonnet-4-6"  # claude-code-local accepts any model id
 MAX_TOKENS = int(os.environ.get("LOCAL_LLM_MAX_TOKENS", "800"))
 
 backend = (FLAG.read_text().strip() if FLAG.exists() else "claude").lower()
@@ -39,6 +46,42 @@ if backend == "claude":
               f"Set CLAUDE_BIN env var or install Claude Code.", file=sys.stderr)
         sys.exit(127)
     os.execv(CLAUDE_BIN, [CLAUDE_BIN] + sys.argv[1:])
+
+
+def is_anthropic_url(url: str) -> bool:
+    try:
+        path = urllib.parse.urlsplit(url).path
+    except ValueError:
+        return False
+    return path.rstrip("/").endswith("/v1/messages")
+
+
+def ccl_up(port: str) -> bool:
+    """True when claude-code-local's /health answers with an ok status."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1.5) as r:
+            raw = r.read()
+    except Exception:
+        return False
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return b"ok" in raw
+    if isinstance(data, dict):
+        return data.get("status") == "ok" or data.get("ok") is True
+    return False
+
+
+def pick_local_url() -> str:
+    url = os.environ.get("LOCAL_LLM_URL")
+    if url:
+        return url
+    ccl_port = os.environ.get("CCL_PORT") or "4000"
+    if ccl_up(ccl_port):
+        return f"http://127.0.0.1:{ccl_port}/v1/messages"
+    llm_port = os.environ.get("LLM_PORT") or "9420"
+    return f"http://127.0.0.1:{llm_port}/v1/chat/completions"
+
 
 # local backend: parse out the prompt argument from `-p PROMPT` or stdin
 args = sys.argv[1:]
@@ -53,8 +96,15 @@ while i < len(args):
 if not prompt:
     prompt = sys.stdin.read()
 
+LOCAL_URL = pick_local_url()
+ANTHROPIC = is_anthropic_url(LOCAL_URL)
+headers = {"Content-Type": "application/json"}
+if ANTHROPIC:
+    headers["x-api-key"] = os.environ.get("LOCAL_LLM_API_KEY", "sk-local")
+    headers["anthropic-version"] = "2023-06-01"
+
 body = {
-    "model": LOCAL_MODEL,
+    "model": os.environ.get("LOCAL_LLM_MODEL") or (ANTHROPIC_MODEL if ANTHROPIC else OPENAI_MODEL),
     "messages": [{"role": "user", "content": prompt}],
     "max_tokens": MAX_TOKENS,
     "temperature": 0.3,
@@ -63,14 +113,19 @@ try:
     req = urllib.request.Request(
         LOCAL_URL,
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=300 if ANTHROPIC else 120) as r:
         res = json.loads(r.read())
-    msg = res["choices"][0]["message"]
-    # Some models (Gemma 3) emit a reasoning channel; the final answer is in `content`
-    content = (msg.get("content") or msg.get("reasoning") or "").strip()
+    if ANTHROPIC:
+        blocks = res["content"]
+        content = "".join(b.get("text", "") for b in blocks
+                          if isinstance(b, dict) and b.get("type") == "text").strip()
+    else:
+        msg = res["choices"][0]["message"]
+        # Some models (Gemma 3) emit a reasoning channel; the final answer is in `content`
+        content = (msg.get("content") or msg.get("reasoning") or "").strip()
     sys.stdout.write(content + ("\n" if not content.endswith("\n") else ""))
     sys.exit(0)
 except Exception as e:

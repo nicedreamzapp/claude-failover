@@ -48,14 +48,29 @@ def home(tmp_path: Path) -> Path:
     return h
 
 
+def _dead_port() -> int:
+    """A port with nothing listening on it (bound then released)."""
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @pytest.fixture
 def base_env(home: Path) -> dict:
-    """A clean environment: no proxies, no tokens, HOME pointed at a temp dir."""
+    """A clean environment: no proxies, no tokens, HOME pointed at a temp dir.
+
+    CCL_PORT and LLM_PORT point at closed ports so no test can ever reach a
+    real claude-code-local (4000) server on the machine. run_agent also
+    points LLM_PORT at a closed port so the 9420 fallback is never real.
+    """
     return {
         "PATH": _SYSTEM_PATH,
         "HOME": str(home),
         "LANG": "C.UTF-8",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "CCL_PORT": str(_dead_port()),
     }
 
 
@@ -103,6 +118,8 @@ class FakeLLMServer:
         self.status = 200
         self.response: object = {"choices": [{"message": {"role": "assistant", "content": "hello from local"}}]}
         self.raw_body: bytes | None = None
+        self.health_status = 200
+        self.health_body = b'{"status": "ok", "model": "fake"}'
 
         outer = self
 
@@ -119,7 +136,10 @@ class FakeLLMServer:
 
             def do_GET(self):
                 outer.requests.append({"method": "GET", "path": self.path})
-                self._reply(200, b'{"data": []}')
+                if self.path == "/health":
+                    self._reply(outer.health_status, outer.health_body)
+                else:
+                    self._reply(200, b'{"data": []}')
 
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", 0))
@@ -143,6 +163,19 @@ class FakeLLMServer:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}/v1/chat/completions"
 
+    @property
+    def messages_url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/v1/messages"
+
+    def anthropic(self, text: str = "hello from ccl") -> "FakeLLMServer":
+        """Answer POSTs like claude-code-local's /v1/messages."""
+        self.response = {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}],
+        }
+        return self
+
     def __enter__(self):
         self.thread.start()
         return self
@@ -161,11 +194,7 @@ def llm_server():
 @pytest.fixture
 def free_port() -> int:
     """A port with nothing listening on it (bound then released)."""
-    import socket
-
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return _dead_port()
 
 
 # --------------------------------------------------------------------------- #
@@ -174,7 +203,7 @@ def free_port() -> int:
 @pytest.fixture
 def run_agent(base_env):
     def _run(*args: str, env: dict | None = None, stdin: str | None = "", timeout: float = 30):
-        e = dict(base_env)
+        e = dict(base_env, LLM_PORT=str(_dead_port()))
         e.update(env or {})
         return subprocess.run(
             [sys.executable, str(AGENT_LLM), *args],
@@ -205,7 +234,9 @@ class FakeMacTools:
         self.launchctl_log = self.state / "launchctl.log"
         self.curl_log = self.state / "curl.log"
         self.notify_log = self.state / "notify.log"
+        self.health_log = self.state / "health.log"
         self.up_after: int | None = None
+        self.ccl_up = False
         self.loaded_label: str | None = None
 
         write_exe(
@@ -221,6 +252,13 @@ exit 0
         write_exe(
             self.bin / "curl",
             f"""#!/bin/sh
+case "$*" in
+  */health)
+    echo "$*" >> "{self.health_log}"
+    [ -f "{self.state}/ccl_up" ] || exit 7
+    echo '{{"status": "ok"}}'
+    exit 0 ;;
+esac
 echo "$*" >> "{self.curl_log}"
 [ -f "{self.state}/up_after" ] || exit 7
 n=$(wc -l < "{self.curl_log}")
@@ -247,6 +285,11 @@ echo "$@" >> "{self.notify_log}"
             loaded.unlink(missing_ok=True)
         else:
             loaded.write_text(self.loaded_label)
+        ccl = self.state / "ccl_up"
+        if self.ccl_up:
+            ccl.write_text("1")
+        else:
+            ccl.unlink(missing_ok=True)
 
     @staticmethod
     def _lines(p: Path) -> list[str]:
@@ -259,6 +302,10 @@ echo "$@" >> "{self.notify_log}"
     @property
     def curl_calls(self) -> list[str]:
         return self._lines(self.curl_log)
+
+    @property
+    def health_calls(self) -> list[str]:
+        return self._lines(self.health_log)
 
     @property
     def notifications(self) -> list[str]:

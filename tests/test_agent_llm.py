@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+from conftest import FakeLLMServer
+
 
 def _flag(path, value: str):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,3 +289,84 @@ class TestLocalErrors:
     def test_malformed_url(self, local):
         r, _ = local("-p", "hi", env={"LOCAL_LLM_URL": "not a url"})
         self._assert_error(r, "unknown url type")
+
+
+# --------------------------------------------------------------------------- #
+# Local server selection: LOCAL_LLM_URL, then claude-code-local, then mlx-lm
+# --------------------------------------------------------------------------- #
+def _h(req: dict) -> dict:
+    return {k.lower(): v for k, v in req["headers"].items()}
+
+
+class TestServerSelection:
+    @pytest.fixture
+    def run_local(self, run_agent, flag, fake_claude):
+        _flag(flag, "local")
+
+        def _run(env, **kw):
+            return run_agent("-p", "hi", env=dict(env, CLAUDE_BIN=str(fake_claude.path)), **kw)
+
+        return _run
+
+    def test_prefers_claude_code_local_when_health_answers(self, run_local, free_port):
+        with FakeLLMServer() as ccl, FakeLLMServer() as mlx:
+            ccl.anthropic("from ccl")
+            r = run_local({"CCL_PORT": str(ccl.port), "LLM_PORT": str(mlx.port)})
+            assert r.returncode == 0, r.stderr
+            assert r.stdout == "from ccl\n"
+            assert mlx.requests == []
+            post = [q for q in ccl.requests if q["method"] == "POST"][0]
+            assert post["path"] == "/v1/messages"
+            assert _h(post)["x-api-key"] == "sk-local"
+            assert _h(post)["anthropic-version"]
+            assert post["json"]["model"] == "claude-sonnet-4-6"
+            assert post["json"]["messages"] == [{"role": "user", "content": "hi"}]
+            assert post["json"]["max_tokens"] == 800
+
+    def test_falls_back_to_mlx_when_ccl_is_down(self, run_local, free_port):
+        with FakeLLMServer() as mlx:
+            r = run_local({"CCL_PORT": str(free_port), "LLM_PORT": str(mlx.port)})
+            assert r.returncode == 0, r.stderr
+            assert r.stdout == "hello from local\n"
+            assert mlx.requests[-1]["path"] == "/v1/chat/completions"
+            assert mlx.requests[-1]["json"]["model"] == "mlx-community/Qwen2.5-7B-Instruct-4bit"
+
+    def test_unhealthy_ccl_is_skipped(self, run_local):
+        with FakeLLMServer() as ccl, FakeLLMServer() as mlx:
+            ccl.health_status = 503
+            r = run_local({"CCL_PORT": str(ccl.port), "LLM_PORT": str(mlx.port)})
+            assert r.returncode == 0, r.stderr
+            assert [q for q in ccl.requests if q["method"] == "POST"] == []
+            assert len(mlx.requests) == 1
+
+    def test_local_llm_url_wins_over_ccl(self, run_local):
+        with FakeLLMServer() as ccl, FakeLLMServer() as other:
+            ccl.anthropic()
+            r = run_local({"CCL_PORT": str(ccl.port), "LOCAL_LLM_URL": other.url})
+            assert r.returncode == 0, r.stderr
+            assert ccl.requests == []  # not even probed
+            assert len(other.requests) == 1
+
+    def test_messages_url_speaks_anthropic(self, run_local):
+        with FakeLLMServer() as srv:
+            srv.response = {"content": [{"type": "thinking", "thinking": "x"},
+                                        {"type": "text", "text": "part 1 "},
+                                        {"type": "text", "text": "part 2"}]}
+            r = run_local({"LOCAL_LLM_URL": srv.messages_url, "LOCAL_LLM_MODEL": "m"})
+            assert r.returncode == 0, r.stderr
+            assert r.stdout == "part 1 part 2\n"
+            assert srv.requests[0]["json"]["model"] == "m"
+            assert _h(srv.requests[0])["x-api-key"] == "sk-local"
+
+    def test_anthropic_api_key_from_env(self, run_local):
+        with FakeLLMServer() as srv:
+            srv.anthropic()
+            run_local({"LOCAL_LLM_URL": srv.messages_url, "LOCAL_LLM_API_KEY": "k2"})
+            assert _h(srv.requests[0])["x-api-key"] == "k2"
+
+    def test_anthropic_response_without_content_is_an_error(self, run_local):
+        with FakeLLMServer() as srv:
+            srv.response = {"type": "error"}
+            r = run_local({"LOCAL_LLM_URL": srv.messages_url})
+            assert r.returncode == 1
+            assert "'content'" in r.stderr
